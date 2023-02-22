@@ -50,7 +50,9 @@ res_cpi_seq$holm = p.adjust(res_cpi_seq$p.value, "holm")
 fit <- my_learner$train(my_task)
 pred <-  Predictor$new(fit, data = test, y = "y")
 
-
+# validate model
+fit$predict_newdata(newdata = test)$score(measures = msr("regr.mse")) ## MSE: 538157.1
+fit$predict_newdata(newdata = test)$score(measures = msr("regr.rsq")) ## R squared: 0.9425527
 
 # PFI
 res_pfi =  iml::FeatureImp$new(predictor = pred, loss = my_loss, compare = "difference", n.repetitions = 5)$results 
@@ -97,12 +99,18 @@ res_loco$importance = as.numeric(res_loco$importance)
 res_loco$feature = unlist(res_loco$feature)
 res_loco$holm = p.adjust(res_loco$ttest, "holm")
 
+# Boruta -- print results
+library(Boruta)
+print("Variables confirmed by Boruta for being relevant:")
+Boruta(y ~ . , data = train, num.threads = 1)$finalDecision  
+# --> Boruta does classify relevance of all variables as 'Confirmed'
+
 
 ## plot results
 
 plt_cpi_seq <- ggplot(res_cpi_seq, aes(x= feature , y=importance, fill = holm < 0.05)) + scale_fill_manual(values = c("#BC3C29FF", "darkblue"))+
-  geom_bar(stat='identity') + ggtitle("CPI sequential")+ 
-  coord_flip() +  labs(fill='CPI sequential: Significant') +
+  geom_bar(stat='identity') + ggtitle("CPIseq")+ 
+  coord_flip() +  labs(fill='CPIseq: Significant') +
   theme_minimal()+theme(plot.title = element_text(hjust = 0.5), legend.position="none",axis.title.y=element_blank(),
                         legend.title=element_text(size=12), 
                         legend.text=element_text(size=12))+ylab("Importance")
@@ -152,6 +160,6 @@ legend_plt <- ggplot(legend_dat, aes(x= x , y=y, fill = importance)) + scale_fil
 legend_plt
 legend <- cowplot::get_legend(legend_plt)
 final_plot <- plot_grid(plt_cpi_seq,plt_loco, plt_cs,plt_pfi,plt_sage,legend, ncol = 3, rel_widths = c(.3,.3,.3),rel_heights = c(.5), labels =c("A", "B", "C", "D", "E"), label_x = c(0.02, 0.02,0.02) )
-#ggsave(final_plot, file="./real_data/diamonds.eps", device="eps")
+ggsave(final_plot, file="./real_data/diamonds.eps", device="eps")
 res <- data.frame(bind_rows(res_cpi_seq, res_cs, res_loco, res_pfi, res_sage), method = rep(c("CPI", "CS", "LOCO", "PFI", "SAGE"), each = 9))
-#write.csv(apply(res,2,as.character), file = "./real_data/res_diamonds.csv")
+write.csv(apply(res,2,as.character), file = "./real_data/res_diamonds.csv")

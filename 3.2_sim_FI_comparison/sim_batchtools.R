@@ -29,6 +29,9 @@ addProblem(name = "dgp", fun = my_dgp, seed = 1)
 # Algorithms -----------------------------------------------------------
 source("algorithms.R") # Algorithms
 
+addAlgorithm(name = "boruta", fun = boruta) ## added 0123
+addAlgorithm(name = "cpi_gauss", fun = cpi_gauss) ## added 0123
+addAlgorithm(name = "cpi_deep", fun = cpi_gauss) ## added 0123
 addAlgorithm(name = "cpi_seq", fun = cpi_seq)
 addAlgorithm(name = "loco", fun = loco)
 addAlgorithm(name = "cond_subgroup", fun = cond_subgroup)
@@ -39,7 +42,6 @@ addAlgorithm(name = "sage", fun = SAGE)
 
 repls <-  500
 n <- c(300,500, 1000, 2000, 2500,3000)
-#n = c(1000,2000,3000,4000,5000,6000,7000,8000)
 p <- c(12)
 num_cat <- c(2,5)
 error_level <- c(2)
@@ -58,11 +60,14 @@ prob_design <- list(
                           outcome = outcome_y))
 )
 algo_design <- list(
-   cpi_seq = expand.grid(learner = learners, space=space),
-   pfi = expand.grid(learner = learners, space=space),
-   loco = expand.grid(learner = learners,space=space),
-   cond_subgroup = expand.grid(learner = learners,space=space),
-   sage = expand.grid(learner = learners,space=space)
+   boruta = data.frame("learner" = "boruta", "space" = space), ## added 0123
+   cpi_gauss = expand.grid(learner = learners, space=space), ## added 0123
+   cpi_deep = expand.grid(learner = learners, space=space)#, ## added 0123
+#   cpi_seq = expand.grid(learner = learners, space=space),
+#   pfi = expand.grid(learner = learners, space=space),
+#   loco = expand.grid(learner = learners,space=space),
+#   cond_subgroup = expand.grid(learner = learners,space=space),
+#   sage = expand.grid(learner = learners,space=space)
 )
 
 addExperiments(prob_design, algo_design, repls = repls)
@@ -88,18 +93,20 @@ waitForJobs()
 # Get results -------------------------------------------------------------
 reduceResultsList()
 #res <-  flatten(ijoin(reduceResultsDataTable(), getJobPars()))
-resi = unwrap(ijoin(reduceResultsDataTable(), getJobPars()))
-unlist(getJobPars(id = 41))
+resi = unwrap(ijoin(reduceResultsDataTable(24001:168000), getJobPars(24001:168000))) # for CPIgauss and CPI deep results 
+#resi = unwrap(ijoin(reduceResultsDataTable(), getJobPars())) # when running other (res_0808) results
+#resi = unwrap(ijoin(reduceResultsDataTable(id = 1:24000), getJobPars(1:24000))) # for botura results
+#unlist(getJobPars(id = 41)) # example
 #
-write.csv(apply(resi,2,as.character), file = "/home/blesch/knockoffs/sim_FI_comparison/res_0808.csv", row.names = F)
+#write.csv(apply(resi,2,as.character), file = "/home/blesch/knockoffs/sim_FI_comparison/res_0808.csv", row.names = F)
+write.csv(apply(resi,2,as.character), file = "/home/blesch/knockoffs/sim_FI_comparison/res_0123.csv", row.names = F)
 
-#rr = read.csv("/home/blesch/knockoffs/sim_FI_comparison/registries/res_00.csv")
-
-res_plot <- resi %>% dplyr::select(-job.id) %>% dplyr::select(-space) %>% group_by(problem, algorithm, n, p, learner, outcome, error_level, cov_base, num_cat) %>% summarise_all(mean)
-res_plot <- melt(res_plot, id.vars = c("problem", "algorithm", "n", "p", "learner", "outcome", "num_cat", "cov_base", "error_level"), value.name = "rejection_rate")
-#res_plot$binary_variables <- do.call(rbind, lapply(res_plot$binary_variables, function(x){paste(x, sep="", collapse="")})) 
-ggplot(res_plot, aes(x = n, y = rejection_rate, col = algorithm )) +
-  facet_grid( variable ~ p  + learner + error_level + cov_base + outcome)+
-  # facet_grid(algorithm ~ p)+
-  geom_line()
+# plot an overview of results
+# res_plot <- resi %>% dplyr::select(-job.id) %>% dplyr::select(-space) %>% group_by(problem, algorithm, n, p, learner, outcome, error_level, cov_base, num_cat) %>% summarise_all(mean)
+# res_plot <- melt(res_plot, id.vars = c("problem", "algorithm", "n", "p", "learner", "outcome", "num_cat", "cov_base", "error_level"), value.name = "rejection_rate")
+# #res_plot$binary_variables <- do.call(rbind, lapply(res_plot$binary_variables, function(x){paste(x, sep="", collapse="")})) 
+# ggplot(res_plot, aes(x = n, y = rejection_rate, col = algorithm )) +
+#   facet_grid( variable ~ p  + learner + error_level + cov_base + outcome)+
+#   # facet_grid(algorithm ~ p)+
+#   geom_line()
 

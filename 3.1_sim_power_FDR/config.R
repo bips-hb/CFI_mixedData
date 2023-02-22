@@ -1,2 +1,2 @@
-cluster.functions = makeClusterFunctionsMulticore(ncpus = 10)
+cluster.functions = makeClusterFunctionsMulticore(ncpus = 20)
 #cluster.functions = makeClusterFunctionsInteractive()

@@ -2,12 +2,12 @@ library(ggplot2)
 library(cowplot)
 library(dplyr)
 res = read.csv("./sim_FI_comparison/res_0808.csv") %>% dplyr::select(-space)  %>% dplyr::select(-job.id)
-
-
+res2 = read.csv("./sim_FI_comparison/res_0123.csv") %>% dplyr::select(-space)  %>% dplyr::select(-job.id)
+res_full = rbind(res,res2)
 # single plot for paper
-res_plot = res  %>% group_by(problem,algorithm, n, p, num_cat, learner, outcome,  error_level,cov_base) %>%dplyr::summarize(mean_auc = mean(auc), sd_auc = sd(auc),
+res_plot = res_full  %>% group_by(problem,algorithm, n, p, num_cat, learner, outcome,  error_level,cov_base) %>%dplyr::summarize(mean_auc = mean(auc), sd_auc = sd(auc),
                                                                                                                             min_auc = min(auc), max_auc = max(auc))
-colcol = c("#20854EFF",  "#BC3C29FF","#E18727FF", "#0072B5FF","#6F99ADFF")
+colcol = c("#20854EFF", "#EE4C97FF","#7876B1FF" , "#BC3C29FF","#E18727FF", "#0072B5FF","#6F99ADFF") 
 
 auc_plot=ggplot(res_plot  %>% dplyr::filter(outcome == "regr")   %>% dplyr::filter(problem == "dgp")   %>% 
          filter(learner == "ranger")  %>%  dplyr::filter(num_cat == 5) %>% filter(cov_base == 0.8) %>%
@@ -16,21 +16,23 @@ auc_plot=ggplot(res_plot  %>% dplyr::filter(outcome == "regr")   %>% dplyr::filt
   geom_ribbon(aes(ymin = mean_auc-sd_auc, ymax = mean_auc+sd_auc, fill = algorithm), linetype = 0, alpha = 0.1)+
  # geom_errorbar(aes(ymin = min_auc, ymax =max_auc, col = algorithm), alpha = 0.5)+
   scale_fill_manual(values = colcol, 
-                        labels = c("Conditional Subgroup", "CPI sequential", "LOCO", "PFI", "SAGE"))+
+                        labels = c("CS","CPIdeep", "CPIgauss", "CPIseq", "LOCO", "PFI", "SAGE"))+
   scale_color_manual(values = colcol, 
-                    labels = c("Conditional Subgroup", "CPI sequential", "LOCO", "PFI", "SAGE"))+
-  scale_shape_manual(values = 1:5, 
-                     labels = c("Conditional Subgroup", "CPI sequential", "LOCO", "PFI", "SAGE"))+
+                    labels = c("CS","CPIdeep", "CPIgauss", "CPIseq", "LOCO", "PFI", "SAGE"))+
+  scale_shape_manual(values = 1:7, 
+                     labels =c("CS","CPIdeep", "CPIgauss", "CPIseq", "LOCO", "PFI", "SAGE"))+
  # ggtitle("sd - outcome = regr, num_cat = 5, cov_base = 0.8, error_level = 2")+
   theme_minimal(base_size = 20)+ylim(c(0.6,1.035))+
   theme(legend.key.size = ggplot2::unit(2, "line"))+
   ylab("AUC")+
   xlab("Sample Size")+
+  scale_x_continuous(breaks= unique(res$n))+
   labs(fill = "Feature Importance \nMeasure", col = "Feature Importance \nMeasure",shape = "Feature Importance \nMeasure")+
   geom_line(size = 1.5)
-ggsave(auc_plot, file="./sim_FI_comparison/auc.eps", device="eps")
+auc_plot
+#ggsave(auc_plot, file="./sim_FI_comparison/auc.eps", device="eps")
 
-# some additional facet plots
+# some additional facet plots 
 
 #res = res %>% group_by(problem,algorithm, n, p, num_cat, learner, outcome,  error_level,cov_base) %>% summarise_all(mean)
 res_plot = res  %>% group_by(problem,algorithm, n, p, num_cat, learner, outcome,  error_level,cov_base) %>%dplyr::summarize(mean_auc = mean(auc), sd_auc = sd(auc))

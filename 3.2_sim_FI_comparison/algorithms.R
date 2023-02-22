@@ -9,6 +9,7 @@ library(knockoff)
 library(cs)
 library(iml)
 library(pROC)
+library(Boruta)
 #use_condaenv("renv_sage")
 #Sys.setenv(RETICULATE_PYTHON = "/home/blesch/miniconda3/envs/renv_sage/bin/python.exe")
 #library(reticulate)
@@ -22,7 +23,8 @@ library(pROC)
 # for deep knockoffs generation:
 #use_condaenv("knockoffenv_local") # switch to knockoffenv for workstation setup 
 #use_condaenv("knockoffenv") # switch to knockoffenv for workstation setup 
-#source_python('../sim_power_FDR/deep_knockoffs.py', envir = globalenv())
+library(reticulate)
+source_python('../sim_power_FDR/deep_knockoffs.py', envir = globalenv())
 #RETICULATE_PYTHON  = "/home/blesch/.local/share/r-miniconda/envs/mlr3keras/bin/python3.8"
 # define loss function
 my_logloss <- function(actual, predicted){
@@ -218,4 +220,135 @@ SAGE <- function(data, job, instance, learner, ...){
   return(res_list)
 }
 
+####################################
+# add CPI gaussian and CPI deep
+# need to dummy encode data set 
+####################################
 
+make_mlr3_dummy <- function(instance, learner){
+  print("dummy encode dataset")
+  # dummy encode instance
+  dummy_dat = lapply(instance, function(x){dummy_cols(x[,!names(x)%in%c("y")], remove_selected_columns = TRUE, remove_first_dummy = TRUE)}) 
+  dummy_dat$train$y = instance$train$y
+  dummy_dat$test$y = instance$test$y
+  
+  # nnet does not support integer encoded dummies -> to numeric
+  if (learner == "nnet"){
+    dummy_dat$train =  dummy_dat$train %>% dplyr::mutate_if(is.integer,as.numeric)
+    dummy_dat$test =  dummy_dat$test %>% dplyr::mutate_if(is.integer,as.numeric)
+    }
+  # now define task ON DUMMY DATA
+  # need to define task here because of reordering in mlr3 $feature_names()
+  
+  if (is.double(dummy_dat$train$y)){ 
+    print("TEST PRINT numeric instance")
+    if (learner == "regression"){ learner = "lm"}
+    my_learner <- lrn(paste0("regr.", learner), predict_type = "response")
+    if (learner == "nnet"){my_learner$param_set$values = list(size = 20, decay = 0.1)}
+    # define task, measure, loss
+    my_task <- as_task_regr(x = dummy_dat$train, target = "y") 
+    my_measure <- msr("regr.mse")
+    my_loss <- Metrics::mse
+    my_loss_instance <-  Metrics::se
+    my_loss_subgroup <-Metrics::mse
+  }
+  else if (is.factor(dummy_dat$train$y)){ 
+    print("TEST PRINT integer/ classification instance")
+    if (learner == "regression"){ learner = "log_reg"} # need to respell for regression because learner name does not match actual learner name
+    my_learner <- lrn(paste0("classif.", learner), predict_type = "prob")
+    if (learner == "nnet"){my_learner$param_set$values = list(size = 20, decay = 0.1)}
+    # define task, measure, loss
+    my_task <-  as_task_classif(x = dummy_dat$train, target = "y") 
+    my_measure <- msr("classif.logloss")
+    my_loss_instance <- Metrics::ll
+    my_loss <-Metrics::logLoss
+    my_loss_subgroup <-my_logloss
+
+  } else {print("please specify prediction type" )}
+  # define groups of dummys that encode the same variable
+  vars = unique(gsub("_.*", "",my_task$feature_names))
+  level_cols <- lapply(vars, FUN = function(x){which(x == gsub("_.*", "",my_task$feature_names))})
+  grps = mapply(function(vars,level_cols) { level_cols }, vars, level_cols, SIMPLIFY = FALSE,USE.NAMES = TRUE)
+ # print(grps)
+
+  return(list("learner" = my_learner, "task" = my_task, "measure" = my_measure, "loss" = my_loss, "loss_instance"= my_loss_instance,
+              "loss_subgroup" = my_loss_subgroup,
+              "true_importances" =data.frame("Variable" = colnames(instance$train)[!names(instance$test) %in% c("y")], 
+                                             "true" = ifelse(grepl("_relevant",colnames(instance$train)[!names(instance$test) %in% c("y")]), 1,0)),
+              "groups" = grps, "test" = dummy_dat$test))
+}
+
+
+cpi_gauss <- function(data, job, instance, learner, ...){
+  my_mlr3_dummy <- make_mlr3_dummy(instance = instance, learner = learner)
+  # generate knockoffs
+  knockoffs <- my_mlr3_dummy$test %>%  select(-"y") %>% {create.second_order(as.matrix(.))} %>% as.data.frame()# CAUTION: avoid chr matrix
+  print("This prints str(knockoffs)")
+  print(str(knockoffs))
+  
+  CPI_r <- cpi(task = my_mlr3_dummy$task,
+               learner = my_mlr3_dummy$learner,
+               resampling = "none",
+               log = FALSE, 
+               test_data = my_mlr3_dummy$test,
+               x_tilde = knockoffs,
+               test = "t",
+               groups = my_mlr3_dummy$groups)
+
+  my_mlr3_dummy$true_importances$Group = gsub("_.*", "",my_mlr3_dummy$true_importances$Variable)
+  res = merge(x = my_mlr3_dummy$true_importances, y = CPI_r, by.x = "Group", by.y = "Group")
+  auc <- pROC::auc(res$true, res$CPI)
+  res$p.value[res$CPI == 0] <- 1.0 # if CPI == 0.000, p.value should be set to 1
+  res$rejected <- (res$p.value < 0.05)*1
+  res = res %>% dplyr::select(Variable, Group,rejected, p.value,CPI) %>% as.data.frame()
+  res$rank = rank(-res$CPI)
+  res$top_p = res$rank <= length(res$rank) / 2
+  res_list = split(res$top_p*1, res$Variable)
+  res_list[['auc']] = auc
+  return(res_list)
+}
+
+cpi_deep <- function(data, job, instance, learner, ...){
+  my_mlr3_dummy <- make_mlr3_dummy(instance = instance, learner = learner)
+  # generate knockoffs
+  knockoffs <-  my_mlr3_dummy$test %>%  mutate_if(is.integer,as.numeric) %>% select(-"y") %>%{generate_deep_knockoffs(.)} %>% as.data.frame()
+  print("This prints str(knockoffs)")
+  print(str(knockoffs))
+  
+  CPI_r <- cpi(task = my_mlr3_dummy$task,
+               learner = my_mlr3_dummy$learner,
+               resampling = "none",
+               log = FALSE, 
+               test_data = my_mlr3_dummy$test,
+               x_tilde = knockoffs,
+               test = "t",
+               groups = my_mlr3_dummy$groups)
+  
+  my_mlr3_dummy$true_importances$Group = gsub("_.*", "",my_mlr3_dummy$true_importances$Variable)
+  res = merge(x = my_mlr3_dummy$true_importances, y = CPI_r, by.x = "Group", by.y = "Group")
+  auc <- pROC::auc(res$true, res$CPI)
+  res$p.value[res$CPI == 0] <- 1.0 # if CPI == 0.000, p.value should be set to 1
+  res$rejected <- (res$p.value < 0.05)*1
+  res = res %>% dplyr::select(Variable, Group,rejected, p.value,CPI) %>% as.data.frame()
+  res$rank = rank(-res$CPI)
+  res$top_p = res$rank <= length(res$rank) / 2
+  res_list = split(res$top_p*1, res$Variable)
+  res_list[['auc']] = auc
+  return(res_list)
+}
+
+###########################
+# add Boruta
+###########################
+
+boruta = function(data, job, instance, learner, ...){
+  
+  res = TentativeRoughFix(Boruta(y ~ . , data = instance$train, num.threads = 1))$finalDecision  
+  # not clear whether to use train or test sample here 
+  # other methods use train to fit model, but test to determine feature importance; 
+  # Boruta does everything on the same data set 
+  res_list = as.list(1*(res == "Confirmed"))
+  names(res_list) = names(res)
+  res_list[['auc']] = NA
+  return(res_list)
+}
